@@ -1,87 +1,113 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "./FractionToken.sol";
 
-contract NFTAuction {
-    IERC721 public immutable nft;
-
+contract NFTAuction is ReentrancyGuard {
     bool public started;
     bool public ended;
 
     uint public endAt;
-    uint public nftId;
     uint public highestBid;
 
-    address payable public seller;
-    address public highestBidder;
-    
-    mapping(address => uint) public bids;
+    uint public auctionIndex;
 
-    event Start();
+    address public seller;
+    address public highestBidder;
+
+    address public immutable devWallet;
+    address public immutable stakeContract;
+    
+    mapping(uint => address) public Winners;
+    mapping(uint => mapping(address => uint)) public bids;
+
+    FToken public immutable fToken;
+
+    event Start(uint auctionId, uint period);
     event Bid(address indexed sender, uint amount);
     event Withdraw(address indexed bidder, uint amount);
     event End(address winner, uint amount);
 
     constructor(
-        address _nft,
-        uint _nftId,
-        uint _startingBid
+        address _fToken,
+        address _dev, 
+        address _stake
     ) {
-        nft = IERC721(_nft);
-        nftId = _nftId;
+        devWallet = _dev;
+        stakeContract = _stake;
 
-        seller = payable(msg.sender);
-        highestBid = _startingBid;
+        fToken = FToken(_fToken);
     }
 
-    function start() external {
+    function start(
+        uint _startingBid,
+        uint _period
+    ) external {
         require(!started, "started");
-        require(msg.sender == seller, "not seller");
+        
+        highestBid = _startingBid;
+        seller = msg.sender;
 
-        nft.transferFrom(msg.sender, address(this), nftId);
+        auctionIndex++;
         started = true;
-        endAt = block.timestamp + 7 days;
+        ended = false;
+        endAt = block.timestamp + _period;
 
-        emit Start();
+        highestBidder = address(0);
+
+        emit Start(auctionIndex, _period);
     }
 
-    function bid() external payable {
-        require(started, "not started");
-        require(block.timestamp < endAt, "ended");
-        require(msg.value > highestBid, "value < highest");
+    function bid() external payable nonReentrant {
+        require(started, "Not started");
+        require(block.timestamp < endAt, "Ended");
 
-        if (highestBidder != address(0)) {
-            bids[highestBidder] += highestBid;
+        uint userAmount;
+        unchecked {
+            userAmount = bids[auctionIndex][msg.sender] + msg.value;
         }
+        require(userAmount > highestBid, "Amount is low");
 
+        highestBid = userAmount;
         highestBidder = msg.sender;
-        highestBid = msg.value;
+        bids[auctionIndex][msg.sender] = userAmount;
 
-        emit Bid(msg.sender, msg.value);
+        emit Bid(msg.sender, bids[auctionIndex][msg.sender]);
     }
 
-    function withdraw() external {
-        uint bal = bids[msg.sender];
-        bids[msg.sender] = 0;
+    function withdraw(uint auctionId) external nonReentrant {
+        require(Winners[auctionId] != msg.sender, "Winner cant withdraw");
+        require(bids[auctionId][msg.sender] > 0, "Not bidder");
+        
+        uint bal = bids[auctionId][msg.sender];
+        delete bids[auctionId][msg.sender];
+
         payable(msg.sender).transfer(bal);
 
         emit Withdraw(msg.sender, bal);
     }
 
     function end() external {
-        require(started, "not started");
-        require(block.timestamp >= endAt, "not ended");
-        require(!ended, "ended");
+        require(started, "Not started");
+        require(block.timestamp >= endAt, "Not ended");
+        require(!ended, "Already ended");
+        require(seller == msg.sender, "Not seller");
 
         ended = true;
         if (highestBidder != address(0)) {
-            nft.safeTransferFrom(address(this), highestBidder, nftId);
-            seller.transfer(highestBid);
-        } else {
-            nft.safeTransferFrom(address(this), seller, nftId);
+            // sent 5% to the dev wallet
+            uint devAmount = highestBid * 500 / 1e4;
+            payable(devWallet).transfer(devAmount);
+
+            payable(stakeContract).transfer(highestBid - devAmount);
+
+            fToken.auctionMint(highestBidder);
+            Winners[auctionIndex] = highestBidder;
         }
 
         emit End(highestBidder, highestBid);
     }
+
+    receive() external payable {}
 }
