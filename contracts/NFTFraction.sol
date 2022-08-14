@@ -24,8 +24,8 @@ contract NFTFraction is Ownable, ReentrancyGuard {
         address sender
     );
 
-    constructor(address storeAddress) {
-        nftStore = NFTStore(storeAddress);
+    constructor(address _store) {
+        nftStore = NFTStore(_store);
     }
 
     function _mint(

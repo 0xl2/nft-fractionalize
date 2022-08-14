@@ -6,16 +6,15 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
 contract FToken is Ownable, ERC20, ERC20Burnable {
-    address public immutable auctionContract;
+    address public auctionContract;
 
     constructor(
         string memory name, 
-        string memory symbol,
-        address _acution
-    )
-        ERC20(name, symbol)
-    {
-        auctionContract = _acution;
+        string memory symbol
+    ) ERC20(name, symbol) {}
+
+    function setAuction(address _auction) external onlyOwner {
+        auctionContract = _auction;
     }
 
     function mint(address to, uint256 amount) external onlyOwner {
