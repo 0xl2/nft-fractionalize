@@ -8,9 +8,11 @@ contract TestNFT is ERC721 {
 
     constructor() ERC721("Test NFT", "TNFT") {}
 
-    function mint() external returns(uint tokenId) {
-        tokenId = _tokenid + 1;
+    function mint() external returns(uint) {
+        _tokenid++;
 
-        _mint(msg.sender, tokenId);
+        _mint(msg.sender, _tokenid);
+
+        return _tokenid;
     }
 }

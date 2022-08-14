@@ -13,6 +13,7 @@ contract FStake is Ownable, ReentrancyGuard {
     uint256 public lastRewardRate;
     uint256 public totalStakedAmount;
 
+    mapping(address => uint) private userPending;
     mapping(address => uint) public rewardRate;
     mapping(address => uint) public stakedBalance;
 
@@ -40,9 +41,12 @@ contract FStake is Ownable, ReentrancyGuard {
     function pendingReward(address user)
         public
         view
-        returns (uint256)
+        returns (uint256 pendingAmount)
     {
-        return (stakedBalance[user] * (lastRewardRate - rewardRate[user])) / 1e4;
+        unchecked {
+            pendingAmount = userPending[user] + (totalStakedAmount == 0 ? 0 :
+                (stakedBalance[user] * (lastRewardRate - rewardRate[user])) / (totalStakedAmount * 1e4));
+        }
     }
 
     /**
@@ -54,6 +58,8 @@ contract FStake is Ownable, ReentrancyGuard {
 
         address msgSender = msg.sender;
         fToken.safeTransferFrom(msgSender, address(this), amount);
+
+        userPending[msgSender] = pendingReward(msgSender);
 
         stakedBalance[msgSender] += amount;
         rewardRate[msgSender] = lastRewardRate;
@@ -67,6 +73,8 @@ contract FStake is Ownable, ReentrancyGuard {
         require(amount > 0, "Invalid amount");
         address msgSender = msg.sender;
         require(stakedBalance[msgSender] >= amount, "Bigger amount");
+
+        userPending[msgSender] = pendingReward(msgSender);
 
         if(amount == stakedBalance[msgSender]) {
             delete stakedBalance[msgSender];
@@ -99,8 +107,6 @@ contract FStake is Ownable, ReentrancyGuard {
     }
 
     receive() external payable {
-        unchecked {
-            lastRewardRate += msg.value * 1e4 / totalStakedAmount;
-        }
+        unchecked { lastRewardRate += msg.value * 1e4; }
     }
 }

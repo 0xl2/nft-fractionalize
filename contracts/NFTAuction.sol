@@ -9,18 +9,20 @@ contract NFTAuction is ReentrancyGuard {
     bool public ended;
 
     uint public endAt;
-    uint public highestBid;
-
     uint public auctionIndex;
-
-    address public seller;
-    address public highestBidder;
 
     address public immutable devWallet;
     address public immutable stakeContract;
     
-    mapping(uint => address) public Winners;
+    // auctionIndex => Acution
+    mapping(uint => Auction) public auctions;
     mapping(uint => mapping(address => uint)) public bids;
+
+    struct Auction {
+        address seller;
+        address winner;
+        uint256 highestBid;
+    }
 
     FToken public immutable fToken;
 
@@ -43,18 +45,16 @@ contract NFTAuction is ReentrancyGuard {
     function start(
         uint _startingBid,
         uint _period
-    ) external {
+    ) external nonReentrant {
         require(!started, "started");
-        
-        highestBid = _startingBid;
-        seller = msg.sender;
 
-        auctionIndex++;
         started = true;
-        ended = false;
+        ended = false;        
         endAt = block.timestamp + _period;
-
-        highestBidder = address(0);
+        
+        auctionIndex++;
+        auctions[auctionIndex].seller = msg.sender;
+        auctions[auctionIndex].highestBid = _startingBid;
 
         emit Start(auctionIndex, _period);
     }
@@ -64,21 +64,20 @@ contract NFTAuction is ReentrancyGuard {
         require(block.timestamp < endAt, "Ended");
 
         uint userAmount;
-        unchecked {
-            userAmount = bids[auctionIndex][msg.sender] + msg.value;
-        }
-        require(userAmount > highestBid, "Amount is low");
+        unchecked { userAmount = bids[auctionIndex][msg.sender] + msg.value; }
+        require(userAmount > auctions[auctionIndex].highestBid, "Amount is low");
 
-        highestBid = userAmount;
-        highestBidder = msg.sender;
+        auctions[auctionIndex].highestBid = userAmount;
+        auctions[auctionIndex].winner = msg.sender;
+
         bids[auctionIndex][msg.sender] = userAmount;
 
         emit Bid(msg.sender, bids[auctionIndex][msg.sender]);
     }
 
     function withdraw(uint auctionId) external nonReentrant {
-        require(Winners[auctionId] != msg.sender, "Winner cant withdraw");
-        require(bids[auctionId][msg.sender] > 0, "Not bidder");
+        require(auctions[auctionIndex].winner != msg.sender, "Winner cant withdraw");
+        require(bids[auctionId][msg.sender] > 0, "Nothing withdrawable");
         
         uint bal = bids[auctionId][msg.sender];
         delete bids[auctionId][msg.sender];
@@ -88,25 +87,30 @@ contract NFTAuction is ReentrancyGuard {
         emit Withdraw(msg.sender, bal);
     }
 
-    function end() external {
+    function end() external nonReentrant {
         require(started, "Not started");
-        require(block.timestamp >= endAt, "Not ended");
+        // !!!!!!!!!!!!!!! this is only for the testing !!!!!!!!!!!!!!!
+        // require(block.timestamp >= endAt, "Not ended");
         require(!ended, "Already ended");
-        require(seller == msg.sender, "Not seller");
+        require(auctions[auctionIndex].seller == msg.sender, "Not seller");
 
         ended = true;
-        if (highestBidder != address(0)) {
+        address winner = auctions[auctionIndex].winner;
+        uint highestBid = auctions[auctionIndex].highestBid;
+
+        if (winner != address(0)) {
             // sent 5% to the dev wallet
             uint devAmount = highestBid * 500 / 1e4;
             payable(devWallet).transfer(devAmount);
 
-            payable(stakeContract).transfer(highestBid - devAmount);
+            // others will be sent to stake contract
+            (bool sent,) = stakeContract.call{ value: highestBid - devAmount } ("");
+            require(sent, "Failed to send Ether");
 
-            fToken.auctionMint(highestBidder);
-            Winners[auctionIndex] = highestBidder;
+            fToken.auctionMint(winner);
         }
 
-        emit End(highestBidder, highestBid);
+        emit End(winner, highestBid);
     }
 
     receive() external payable {}
