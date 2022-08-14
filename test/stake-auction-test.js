@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe.only("Fraction contract Test", function () {
+describe("Fraction contract Test", function () {
     before("Deploy contracts", async function () {
         const [owner, dev, alice, bob] = await ethers.getSigners();
 
